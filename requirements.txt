@@ -1,0 +1,4 @@
+pandas==2.0.3
+pyotp==2.8.0
+SmartApi==1.1.0
+smartapi_python==1.4.8
