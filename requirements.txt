@@ -1,5 +1,4 @@
-pandas==2.0.3
-smartapi_python==1.4.8
+streamlit==1.37.1
 attrs==23.1.0
 autobahn
 Automat
@@ -31,3 +30,4 @@ typing_extensions==4.6.3
 urllib3==2.0.3
 websocket-client==1.6.0
 zope.interface==6.0
+

@@ -1,5 +1,4 @@
 import streamlit as st
-import pandas as pd
 import datetime as dt
 import time
 import urllib.request
