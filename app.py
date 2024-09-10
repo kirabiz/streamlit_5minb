@@ -74,15 +74,26 @@ def get_live_price(exchange, tradingsymbol, symboltoken):
         st.error(f"Error fetching live price: {e}")
     return None
 
+def get_live_priceBN(exchange, tradingsymbol, symboltoken):
+    try:
+        live_data = obj.ltpData(exchange, tradingsymbol, symboltoken)
+        if live_data and 'data' in live_data and live_data['data']:
+            return live_data['data']['ltp']
+    except Exception as e:
+        print(f"Error fetching live price: {e}")
+    return None
+
 # Function to monitor and exit trade
-def monitor_and_exit(symbol_token, entry_price, exit_price, stop_loss, exit_details, tradingsymbol):
+def monitor_and_exit(symbol_token, exit_price, stop_loss,tradingsymbol,order_id):
     while True:
         time.sleep(1)  # Delay to avoid rate limits
+
         live_price = get_live_price("NFO", tradingsymbol, symbol_token)
         if live_price is None:
             continue
                     
         if live_price >= exit_price or live_price <= stop_loss:
+            obj.cancelOrder(order_id, "NORMAL")
             st.write(f"Exited at {live_price}")
             break
 
@@ -103,7 +114,8 @@ def place_order(tradingsymbol, symbol_token, transaction_type, order_type="MARKE
     if order_type == "LIMIT" and price is not None:
         order_params["price"] = price
 
-    order_id = obj.placeOrder(order_params)
+    # order_id = obj.placeOrder(order_params)
+    order_id="201020000000080"
     st.write("Order placed")
     return order_id
 
@@ -113,22 +125,34 @@ def live_strategy():
     high = 0
     low = float('inf')
     prices = []
-
-    start_time = dt.datetime.combine(dt.datetime.now().date(), dt.time(9, 16))
-    end_time = dt.datetime.combine(dt.datetime.now().date(), dt.time(9, 20))
     
-    banknifty_price = fetch_historical_data("NSE", "BANKNIFTY", "99926009", start_time, end_time)
-    if banknifty_price:
-        for candle in banknifty_price:
-            candle_time, open_price, high_price, low_price, close_price, volume = candle
-            prices.append((high_price, low_price))
-
+    current_time = dt.datetime.now().time()
+    start_time = dt.datetime.combine(dt.datetime.now().date(), dt.time(9,16))
+    end_time = dt.datetime.combine(dt.datetime.now().date(), dt.time(9,20))     
+    while dt.time(9,15)<=dt.datetime.now().time() <= dt.time(9,21):
+        time.sleep(1)  # Delay to avoid rate limits
+        if current_time==dt.time(9,15):
+            continue
+        banknifty_price = get_live_priceBN("NSE", "BANKNIFTY", "99926009")
+        if banknifty_price is not None:
+            prices.append((banknifty_price, banknifty_price))
+            
+    if current_time>dt.time(9,20):
+        # If the script starts after 9:19, fetch historical data
+        start_datetime = dt.datetime.combine(dt.datetime.now().date(), dt.time(9, 16))
+        end_datetime = dt.datetime.combine(dt.datetime.now().date(), dt.time(9, 20))
+        historical_data = fetch_historical_data("NSE", "BANKNIFTY", "99926009", start_datetime, end_datetime)
+        if historical_data:
+            for candle in historical_data:
+                candle_time, open_price, high_price, low_price, close_price, volume = candle
+                prices.append((high_price, low_price))
+                
     if prices:
         high = max(price[0] for price in prices)
         low = min(price[1] for price in prices)
         st.write(f"Final High: {high}")
         st.write(f"Final Low: {low}")
-        
+                       
     ce_strike_price = get_nearest_strike_price(high)
     pe_strike_price = get_nearest_strike_price(low)
     st.write(f"CE Strike Price: {ce_strike_price}, PE Strike Price: {pe_strike_price}")
@@ -142,37 +166,48 @@ def live_strategy():
 
     st.write(f"CE High from 9:16 to 9:20: {ce_high}")
     st.write(f"PE High from 9:16 to 9:20: {pe_high}")
+    
+    
 
     trade_executed = False
-    while not trade_executed and dt.datetime.now().time() > dt.time(9, 20):
+    while not trade_executed and dt.datetime.now().time() >= dt.time(9,21):
         
         ce_live_price = get_live_price("NFO", f"BANKNIFTY{ce_strike_price}CE", f"{ce_strike_price}CE")
+        print("CE Live price: ",ce_live_price)
         pe_live_price = get_live_price("NFO", f"BANKNIFTY{pe_strike_price}PE", f"{pe_strike_price}PE")
+        print("PE Live price: ",pe_live_price)
 
-        if ce_live_price and ce_live_price >= ce_high + 5:
+        if ce_live_price and ce_live_price >= ce_high + 5  :
             st.write(f"CE Option triggered at {ce_live_price} (CE High + 5: {ce_high + 5})")
             expiry_date="11SEP24"
             option_symbol = f'BANKNIFTY{expiry_date}{f"{ce_strike_price}CE"}'
             symbol_token = next((item['token'] for item in instrument_list if item['symbol'] == option_symbol), None)
-            place_order(f"BANKNIFTY{expiry_date}{ce_strike_price}CE", symbol_token, "BUY")
+            order_id=place_order(f"BANKNIFTY{expiry_date}{ce_strike_price}CE", symbol_token, "BUY")
             trade_executed = True
+            exit_price=ce_live_price+1
+            stop_loss=ce_live_price-1000
+            st.write("Trade executed. Monitoring exit conditions...")
+            monitor_and_exit(f"{ce_strike_price}CE", exit_price, stop_loss,f"BANKNIFTY{ce_strike_price}CE",order_id)
             break
 
-        if pe_live_price and pe_live_price >= pe_high + 5:
+        if pe_live_price and pe_live_price >= pe_high + 5 :
             st.write(f"PE Option triggered at {pe_live_price} (PE High + 5: {pe_high + 5})")
             expiry_date="11SEP24"
             option_symbol = f'BANKNIFTY{expiry_date}{f"{pe_strike_price}PE"}'
             symbol_token = next((item['token'] for item in instrument_list if item['symbol'] == option_symbol), None)
-            place_order(f"BANKNIFTY{expiry_date}{pe_strike_price}PE", symbol_token, "BUY")
+            order_id=place_order(f"BANKNIFTY{expiry_date}{pe_strike_price}PE", symbol_token, "BUY")
             trade_executed = True
+            exit_price=pe_live_price+1
+            stop_loss=pe_live_price-1000
+            st.write("Trade executed. Monitoring exit conditions...")
+            monitor_and_exit(f"{pe_strike_price}PE", exit_price, stop_loss,f"BANKNIFTY{pe_strike_price}PE",order_id)
             break
 
-        time.sleep(2)
+        time.sleep(1)
 
-    st.write("Trade executed. Monitoring exit conditions...")
+        
 
-
-st.title("BankNifty Trading Strategy")
+st.write("Banknifty Strategy")
 if st.button('Execute Strategy'):
     live_strategy()
-    st.write("Strategy run successfully.")
+    
